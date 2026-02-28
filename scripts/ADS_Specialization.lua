@@ -102,6 +102,20 @@ local function log_dbg(...)
     end
 end
 
+
+local function addSideNotificationSafe(color, text)
+    local mission = g_currentMission
+    if mission ~= nil and mission.hud ~= nil and mission.hud.addSideNotification ~= nil then
+        mission.hud:addSideNotification(color, text)
+    end
+end
+
+local function playSampleSafe(sample)
+    if g_soundManager ~= nil and g_soundManager.playSample ~= nil and sample ~= nil then
+        g_soundManager:playSample(sample)
+    end
+end
+
 local function normalizeBoolValue(value, defaultValue)
     if value == nil then
         return defaultValue == true
@@ -1189,7 +1203,7 @@ function AdvancedDamageSystem:onUpdate(dt, ...)
                 if (spec.transmissionTemperature > 105 or spec.engineTemperature > 105) and not overheatProtection then
                     self:addBreakdown(overheatProtectionId, 1)
                     if self.getIsControlled ~= nil and self:getIsControlled() then
-                        g_soundManager:playSample(spec.samples.alarm)
+                        playSampleSafe(spec.samples.alarm)
                     end
                 elseif overheatProtection then
                     if self:getCruiseControlState() ~= 0 then
@@ -1198,17 +1212,17 @@ function AdvancedDamageSystem:onUpdate(dt, ...)
                     if (spec.transmissionTemperature > 125 or spec.engineTemperature > 125) and overheatProtection.stage < 4 then
                         self:advanceBreakdown(overheatProtectionId)
                         if self.getIsControlled ~= nil and self:getIsControlled() then
-                            g_soundManager:playSample(spec.samples.alarm)
+                            playSampleSafe(spec.samples.alarm)
                         end
                     elseif (spec.transmissionTemperature > 115 or spec.engineTemperature > 115) and overheatProtection.stage < 3 then
                         self:advanceBreakdown(overheatProtectionId)
                         if self.getIsControlled ~= nil and self:getIsControlled() then
-                            g_soundManager:playSample(spec.samples.alarm)
+                            playSampleSafe(spec.samples.alarm)
                         end
                     elseif (spec.transmissionTemperature > 110 or spec.engineTemperature > 110) and overheatProtection.stage < 2 then
                         self:advanceBreakdown(overheatProtectionId)
                         if self.getIsControlled ~= nil and self:getIsControlled() then
-                            g_soundManager:playSample(spec.samples.alarm)
+                            playSampleSafe(spec.samples.alarm)
                         end
                     end
                 end
@@ -2284,7 +2298,7 @@ function AdvancedDamageSystem:recalculateAndApplyEffects()
                 applicator.apply(self, spec.activeEffects[effectId], applicator)
                 local currentEffect = spec.activeEffects[effectId]
                 if currentEffect and currentEffect.extraData ~= nil and currentEffect.extraData.message ~= nil and self.getIsControlled ~= nil and not self:getIsControlled() then
-                    g_currentMission.hud:addSideNotification(ADS_Breakdowns.COLORS.WARNING, self:getFullName() .. ": " .. g_i18n:getText(currentEffect.extraData.message))
+                    addSideNotificationSafe(ADS_Breakdowns.COLORS.WARNING, self:getFullName() .. ": " .. g_i18n:getText(currentEffect.extraData.message))
                 end
             end
         elseif wasPreviouslyActive then
@@ -2763,8 +2777,8 @@ function AdvancedDamageSystem:completeService()
         end
     end
 
-    g_currentMission.hud:addSideNotification({1, 1, 1, 1}, maintenanceCompletedText)
-    g_soundManager:playSample(spec.samples.maintenanceCompleted)
+    addSideNotificationSafe({1, 1, 1, 1}, maintenanceCompletedText)
+    playSampleSafe(spec.samples.maintenanceCompleted)
 
     spec.maintenanceTimer = 0
     resetPendingServiceProgress(spec)
@@ -2816,7 +2830,7 @@ function AdvancedDamageSystem:completeService()
                 if price > 0 then
                     g_currentMission:addMoney(-1 * price, self:getOwnerFarmId(), MoneyType.VEHICLE_RUNNING_COSTS, true, true)
                 end
-                g_currentMission.hud:addSideNotification(
+                addSideNotificationSafe(
                     {1, 1, 1, 1},
                     string.format("%s: %s", self:getFullName(), string.format(g_i18n:getText('ads_spec_next_planned_service_notification'), g_i18n:getText(nextWork)))
                 )
@@ -2825,7 +2839,7 @@ function AdvancedDamageSystem:completeService()
             end
         else
             ADS_VehicleChangeStatusEvent.send(self)
-            g_currentMission.hud:addSideNotification(
+            addSideNotificationSafe(
                 {1, 1, 1, 1},
                 string.format("%s: %s", self:getFullName(), string.format(g_i18n:getText('ads_spec_next_planned_service_not_enouth_money_notification'), g_i18n:getText(nextWork)))
             )
@@ -2870,7 +2884,7 @@ function AdvancedDamageSystem:cancelService()
         self.spec_enterable:setIsTabbable(true)
     end
 
-    g_currentMission.hud:addSideNotification(
+    addSideNotificationSafe(
         {1, 1, 1, 1},
         string.format("%s: %s %s", self:getFullName(), g_i18n:getText(serviceType), g_i18n:getText("ads_spec_maintenance_cancelled_notification"))
     )
