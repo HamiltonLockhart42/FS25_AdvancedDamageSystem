@@ -181,6 +181,222 @@ local function parseCsvList(csvString)
     return result
 end
 
+
+local ADS_BREAKDOWN_NET_IDS = nil
+local ADS_BREAKDOWN_NET_INDEX_BY_ID = nil
+
+local function ensureBreakdownNetMaps()
+    if ADS_BREAKDOWN_NET_IDS ~= nil and ADS_BREAKDOWN_NET_INDEX_BY_ID ~= nil then
+        return
+    end
+
+    ADS_BREAKDOWN_NET_IDS = {}
+    ADS_BREAKDOWN_NET_INDEX_BY_ID = {}
+
+    if ADS_Breakdowns ~= nil and ADS_Breakdowns.BreakdownRegistry ~= nil then
+        for breakdownId, _ in pairs(ADS_Breakdowns.BreakdownRegistry) do
+            table.insert(ADS_BREAKDOWN_NET_IDS, breakdownId)
+        end
+    end
+
+    table.sort(ADS_BREAKDOWN_NET_IDS)
+
+    for index, breakdownId in ipairs(ADS_BREAKDOWN_NET_IDS) do
+        ADS_BREAKDOWN_NET_INDEX_BY_ID[breakdownId] = index
+    end
+end
+
+local function getTemperatureSyncBand(temperature, coldThreshold, overheatThreshold)
+    local temp = tonumber(temperature) or -99
+
+    if temp <= coldThreshold then
+        return 1
+    elseif temp >= 125 then
+        return 6
+    elseif temp >= 115 then
+        return 5
+    elseif temp >= 110 then
+        return 4
+    elseif temp >= overheatThreshold then
+        return 3
+    end
+
+    return 2
+end
+
+local function buildAdsNetSnapshot(vehicle)
+    local spec = vehicle.spec_AdvancedDamageSystem
+    ensureBreakdownNetMaps()
+
+    local breakdownSnapshot = {}
+    for _, breakdownId in ipairs(ADS_BREAKDOWN_NET_IDS) do
+        local breakdown = spec.activeBreakdowns ~= nil and spec.activeBreakdowns[breakdownId] or nil
+        if breakdown ~= nil then
+            local netIndex = ADS_BREAKDOWN_NET_INDEX_BY_ID[breakdownId]
+            table.insert(breakdownSnapshot, string.format("%d:%d:%d:%d", netIndex, breakdown.stage or 1, breakdown.isVisible == true and 1 or 0, breakdown.isSelectedForRepair == true and 1 or 0))
+        end
+    end
+
+    local coreCfg = ADS_Config ~= nil and ADS_Config.CORE or nil
+    local coldMotorThreshold = coreCfg ~= nil and coreCfg.COLD_MOTOR_THRESHOLD or 40
+    local overheatMotorThreshold = coreCfg ~= nil and coreCfg.OVERHEAT_MOTOR_THRESHOLD or 95
+    local coldTransThreshold = coreCfg ~= nil and coreCfg.COLD_TRANSMISSION_THRESHOLD or 40
+    local overheatTransThreshold = coreCfg ~= nil and coreCfg.OVERHEAT_TRANSMISSION_THRESHOLD or 95
+
+    return {
+        serviceQ = math.floor((spec.serviceLevel or 1) * 200 + 0.5),
+        conditionQ = math.floor((spec.conditionLevel or 1) * 200 + 0.5),
+        engineTempQ = getTemperatureSyncBand(spec.engineTemperature, coldMotorThreshold, overheatMotorThreshold),
+        transTempQ = getTemperatureSyncBand(spec.transmissionTemperature, coldTransThreshold, overheatTransThreshold),
+        maintenanceTimerQ = math.floor(math.max(spec.maintenanceTimer or 0, 0) / 5000 + 0.5),
+        currentState = spec.currentState or "",
+        plannedState = spec.plannedState or "",
+        workshopType = spec.workshopType or "",
+        serviceOptionOne = spec.serviceOptionOne or "",
+        serviceOptionTwo = spec.serviceOptionTwo or "",
+        serviceOptionThree = spec.serviceOptionThree == true,
+        workshopOpen = ADS_Main ~= nil and ADS_Main.isWorkshopOpen == true,
+        breakdownSnapshot = table.concat(breakdownSnapshot, ";")
+    }
+end
+
+local function areAdsSnapshotsEqual(a, b)
+    if a == nil or b == nil then
+        return false
+    end
+
+    return a.serviceQ == b.serviceQ
+        and a.conditionQ == b.conditionQ
+        and a.engineTempQ == b.engineTempQ
+        and a.transTempQ == b.transTempQ
+        and a.maintenanceTimerQ == b.maintenanceTimerQ
+        and a.currentState == b.currentState
+        and a.plannedState == b.plannedState
+        and a.workshopType == b.workshopType
+        and a.serviceOptionOne == b.serviceOptionOne
+        and a.serviceOptionTwo == b.serviceOptionTwo
+        and a.serviceOptionThree == b.serviceOptionThree
+        and a.workshopOpen == b.workshopOpen
+        and a.breakdownSnapshot == b.breakdownSnapshot
+end
+
+local function markNetworkDirty(vehicle, force)
+    if vehicle == nil or not vehicle.isServer or vehicle.spec_AdvancedDamageSystem == nil then
+        return false
+    end
+
+    local spec = vehicle.spec_AdvancedDamageSystem
+    if spec.adsDirtyFlag == nil or spec.adsDirtyFlag == 0 then
+        return false
+    end
+
+    local snapshot = buildAdsNetSnapshot(vehicle)
+    local hasChanged = force == true or not areAdsSnapshotsEqual(spec.lastAdsNetSnapshot, snapshot)
+
+    if hasChanged then
+        spec.lastAdsNetSnapshot = snapshot
+        vehicle:raiseDirtyFlags(spec.adsDirtyFlag)
+        return true
+    end
+
+    return false
+end
+
+local function writeAdsNetworkState(vehicle, streamId)
+    local spec = vehicle.spec_AdvancedDamageSystem
+
+    streamWriteFloat32(streamId, spec.serviceLevel or 1)
+    streamWriteFloat32(streamId, spec.conditionLevel or 1)
+    streamWriteFloat32(streamId, spec.engineTemperature or -99)
+    streamWriteFloat32(streamId, spec.transmissionTemperature or -99)
+
+    streamWriteString(streamId, spec.currentState or "")
+    streamWriteString(streamId, spec.plannedState or "")
+    streamWriteFloat32(streamId, spec.maintenanceTimer or 0)
+
+    streamWriteString(streamId, spec.workshopType or "")
+    streamWriteString(streamId, spec.serviceOptionOne or "")
+    streamWriteString(streamId, spec.serviceOptionTwo or "")
+    streamWriteBool(streamId, spec.serviceOptionThree == true)
+    streamWriteBool(streamId, ADS_Main ~= nil and ADS_Main.isWorkshopOpen == true)
+
+    ensureBreakdownNetMaps()
+    local activeBreakdowns = spec.activeBreakdowns or {}
+    local count = 0
+    for _, breakdownId in ipairs(ADS_BREAKDOWN_NET_IDS) do
+        if activeBreakdowns[breakdownId] ~= nil then
+            count = count + 1
+        end
+    end
+
+    streamWriteUIntN(streamId, count, 10)
+
+    for _, breakdownId in ipairs(ADS_BREAKDOWN_NET_IDS) do
+        local breakdown = activeBreakdowns[breakdownId]
+        if breakdown ~= nil then
+            streamWriteUIntN(streamId, ADS_BREAKDOWN_NET_INDEX_BY_ID[breakdownId], 10)
+            streamWriteUIntN(streamId, math.max(1, math.floor(breakdown.stage or 1)), 5)
+            streamWriteFloat32(streamId, breakdown.progressTimer or 0)
+            streamWriteBool(streamId, breakdown.isVisible == true)
+            streamWriteBool(streamId, breakdown.isSelectedForRepair == true)
+        end
+    end
+end
+
+local function readAdsNetworkState(vehicle, streamId)
+    local spec = vehicle.spec_AdvancedDamageSystem
+
+    spec.serviceLevel = streamReadFloat32(streamId)
+    spec.conditionLevel = streamReadFloat32(streamId)
+    spec.engineTemperature = streamReadFloat32(streamId)
+    spec.transmissionTemperature = streamReadFloat32(streamId)
+
+    spec.currentState = streamReadString(streamId)
+    spec.plannedState = streamReadString(streamId)
+    spec.maintenanceTimer = streamReadFloat32(streamId)
+
+    spec.workshopType = streamReadString(streamId)
+    spec.serviceOptionOne = streamReadString(streamId)
+    if spec.serviceOptionOne == "" then spec.serviceOptionOne = nil end
+
+    spec.serviceOptionTwo = streamReadString(streamId)
+    if spec.serviceOptionTwo == "" then spec.serviceOptionTwo = nil end
+
+    spec.serviceOptionThree = streamReadBool(streamId)
+
+    local workshopOpen = streamReadBool(streamId)
+    if ADS_Main ~= nil then
+        ADS_Main.isWorkshopOpen = workshopOpen
+    end
+
+    ensureBreakdownNetMaps()
+    local breakdownCount = streamReadUIntN(streamId, 10)
+    local rebuiltBreakdowns = {}
+
+    for _ = 1, breakdownCount do
+        local netIndex = streamReadUIntN(streamId, 10)
+        local stage = streamReadUIntN(streamId, 5)
+        local progressTimer = streamReadFloat32(streamId)
+        local isVisible = streamReadBool(streamId)
+        local isSelectedForRepair = streamReadBool(streamId)
+
+        local breakdownId = ADS_BREAKDOWN_NET_IDS[netIndex]
+        if breakdownId ~= nil then
+            rebuiltBreakdowns[breakdownId] = {
+                stage = stage,
+                progressTimer = progressTimer,
+                isVisible = isVisible,
+                isSelectedForRepair = isSelectedForRepair
+            }
+        end
+    end
+
+    spec.activeBreakdowns = rebuiltBreakdowns
+
+    vehicle:setDamageAmount(math.max(0, 1 - spec.serviceLevel), true)
+    vehicle:recalculateAndApplyEffects()
+end
+
 -- ==========================================================
 --                    SAVE/LOAD & REGISTRATION
 -- ==========================================================
@@ -267,6 +483,10 @@ function AdvancedDamageSystem.registerEventListeners(vehicleType)
     SpecializationUtil.registerEventListener(vehicleType, "onDelete", AdvancedDamageSystem)
     SpecializationUtil.registerEventListener(vehicleType, "onUpdate", AdvancedDamageSystem)
     SpecializationUtil.registerEventListener(vehicleType, "saveToXMLFile", AdvancedDamageSystem)
+    SpecializationUtil.registerEventListener(vehicleType, "onWriteStream", AdvancedDamageSystem)
+    SpecializationUtil.registerEventListener(vehicleType, "onReadStream", AdvancedDamageSystem)
+    SpecializationUtil.registerEventListener(vehicleType, "onWriteUpdateStream", AdvancedDamageSystem)
+    SpecializationUtil.registerEventListener(vehicleType, "onReadUpdateStream", AdvancedDamageSystem)
 end
 
 function AdvancedDamageSystem.registerOverwrittenFunctions(vehicleType)
@@ -564,6 +784,7 @@ function AdvancedDamageSystem:onLoad(savegame)
 
     self.spec_AdvancedDamageSystem.effectsUpdateTimer = ADS_Config.EFFECTS_UPDATE_DELAY
     self.spec_AdvancedDamageSystem.metaUpdateTimer = math.random() * ADS_Config.META_UPDATE_DELAY
+    self.spec_AdvancedDamageSystem.adsDirtyFlag = self:getNextDirtyFlag()
     self.spec_AdvancedDamageSystem.maintenanceTimer = 0
     self.spec_AdvancedDamageSystem.currentState = AdvancedDamageSystem.STATUS.READY
     self.spec_AdvancedDamageSystem.plannedState = AdvancedDamageSystem.STATUS.READY
@@ -856,6 +1077,32 @@ function AdvancedDamageSystem:onPostLoad(savegame)
     self:recalculateAndApplyEffects()
 end
 
+
+function AdvancedDamageSystem:onWriteStream(streamId, connection)
+    writeAdsNetworkState(self, streamId)
+end
+
+function AdvancedDamageSystem:onReadStream(streamId, connection)
+    readAdsNetworkState(self, streamId)
+end
+
+function AdvancedDamageSystem:onWriteUpdateStream(streamId, connection, dirtyMask)
+    local spec = self.spec_AdvancedDamageSystem
+    local hasData = spec ~= nil and spec.adsDirtyFlag ~= nil and bitAND(dirtyMask, spec.adsDirtyFlag) ~= 0
+
+    streamWriteBool(streamId, hasData)
+    if hasData then
+        writeAdsNetworkState(self, streamId)
+    end
+end
+
+function AdvancedDamageSystem:onReadUpdateStream(streamId, timestamp, connection)
+    local hasData = streamReadBool(streamId)
+    if hasData then
+        readAdsNetworkState(self, streamId)
+    end
+end
+
 function AdvancedDamageSystem:onDelete()
     log_dbg("onDelete called for vehicle:", self:getFullName(), "ID:", self.uniqueId)
     local spec = self.spec_AdvancedDamageSystem
@@ -889,7 +1136,7 @@ function AdvancedDamageSystem:onUpdate(dt, ...)
     end
 
     --- Registration in ADS_Main.vehicles and first load checks.
-    if ADS_Main and ADS_Main.vehicles and ADS_Main.vehicles[self.uniqueId] == nil then
+    if self.isServer and ADS_Main and ADS_Main.vehicles and ADS_Main.vehicles[self.uniqueId] == nil then
         if (self.propertyState == 2 or self.propertyState == 3 or self.propertyState == 4) and self.ownerFarmId ~= 0 and self.ownerFarmId < 10 then
             log_dbg(" -> Registering vehicle in ADS_Main.vehicles list. ID:", self.uniqueId)
             --- Registration in ADS_Main.vehicles
@@ -920,58 +1167,60 @@ function AdvancedDamageSystem:onUpdate(dt, ...)
         end
     end
 
-    --- just in case, reset damage amount to 0 if it's not
-    if self.getDamageAmount ~= nil and self:getDamageAmount() ~= 0 then self:setDamageAmount(0.0, true) end
+    if self.isServer then
+        --- just in case, reset damage amount to 0 if it's not
+        if self.getDamageAmount ~= nil and self:getDamageAmount() ~= 0 then self:setDamageAmount(0.0, true) end
 
-    --- general wear and tear
-    if self:getConditionLevel() < ADS_Config.CORE.GENERAL_WEAR_THRESHOLD and not self:hasBreakdown('GENERAL_WEAR') then
-        self:addBreakdown('GENERAL_WEAR', 1)
-    elseif self:hasBreakdown('GENERAL_WEAR') and self:getConditionLevel() > ADS_Config.CORE.GENERAL_WEAR_THRESHOLD then
-        self:removeBreakdown('GENERAL_WEAR')
-    end
-
-    --- Overheat protection for vehcile > 2000 year and engine failure from overheating for < 2000
-    if spec.year >= 2000 then
-        local overheatProtectionId = 'OVERHEAT_PROTECTION'
-        local overheatProtection = self:getActiveBreakdowns()[overheatProtectionId]
-        if overheatProtection and spec.transmissionTemperature < 100 and spec.engineTemperature < 100 then
-            self:removeBreakdown(overheatProtectionId)    
+        --- general wear and tear
+        if self:getConditionLevel() < ADS_Config.CORE.GENERAL_WEAR_THRESHOLD and not self:hasBreakdown('GENERAL_WEAR') then
+            self:addBreakdown('GENERAL_WEAR', 1)
+        elseif self:hasBreakdown('GENERAL_WEAR') and self:getConditionLevel() > ADS_Config.CORE.GENERAL_WEAR_THRESHOLD then
+            self:removeBreakdown('GENERAL_WEAR')
         end
-        if self:getIsMotorStarted() then
-            if (spec.transmissionTemperature > 105 or spec.engineTemperature > 105) and not overheatProtection then
-                self:addBreakdown(overheatProtectionId, 1)
-                if self.getIsControlled ~= nil and self:getIsControlled() then
-                    g_soundManager:playSample(spec.samples.alarm)
-                end
-            elseif overheatProtection then
-                if self:getCruiseControlState() ~= 0 then
-                    self:setCruiseControlState(0, true)
-                end
-                if (spec.transmissionTemperature > 125 or spec.engineTemperature > 125) and overheatProtection.stage < 4 then
-                    self:advanceBreakdown(overheatProtectionId)
+
+        --- Overheat protection for vehcile > 2000 year and engine failure from overheating for < 2000
+        if spec.year >= 2000 then
+            local overheatProtectionId = 'OVERHEAT_PROTECTION'
+            local overheatProtection = self:getActiveBreakdowns()[overheatProtectionId]
+            if overheatProtection and spec.transmissionTemperature < 100 and spec.engineTemperature < 100 then
+                self:removeBreakdown(overheatProtectionId)    
+            end
+            if self:getIsMotorStarted() then
+                if (spec.transmissionTemperature > 105 or spec.engineTemperature > 105) and not overheatProtection then
+                    self:addBreakdown(overheatProtectionId, 1)
                     if self.getIsControlled ~= nil and self:getIsControlled() then
                         g_soundManager:playSample(spec.samples.alarm)
                     end
-                elseif (spec.transmissionTemperature > 115 or spec.engineTemperature > 115) and overheatProtection.stage < 3 then
-                    self:advanceBreakdown(overheatProtectionId)
-                    if self.getIsControlled ~= nil and self:getIsControlled() then
-                        g_soundManager:playSample(spec.samples.alarm)
+                elseif overheatProtection then
+                    if self:getCruiseControlState() ~= 0 then
+                        self:setCruiseControlState(0, true)
                     end
-                elseif (spec.transmissionTemperature > 110 or spec.engineTemperature > 110) and overheatProtection.stage < 2 then
-                    self:advanceBreakdown(overheatProtectionId)
-                    if self.getIsControlled ~= nil and self:getIsControlled() then
-                        g_soundManager:playSample(spec.samples.alarm)
+                    if (spec.transmissionTemperature > 125 or spec.engineTemperature > 125) and overheatProtection.stage < 4 then
+                        self:advanceBreakdown(overheatProtectionId)
+                        if self.getIsControlled ~= nil and self:getIsControlled() then
+                            g_soundManager:playSample(spec.samples.alarm)
+                        end
+                    elseif (spec.transmissionTemperature > 115 or spec.engineTemperature > 115) and overheatProtection.stage < 3 then
+                        self:advanceBreakdown(overheatProtectionId)
+                        if self.getIsControlled ~= nil and self:getIsControlled() then
+                            g_soundManager:playSample(spec.samples.alarm)
+                        end
+                    elseif (spec.transmissionTemperature > 110 or spec.engineTemperature > 110) and overheatProtection.stage < 2 then
+                        self:advanceBreakdown(overheatProtectionId)
+                        if self.getIsControlled ~= nil and self:getIsControlled() then
+                            g_soundManager:playSample(spec.samples.alarm)
+                        end
                     end
                 end
             end
-        end
-    else
-        local engineFailedEffect = spec.activeEffects.ENGINE_FAILURE
-        if spec.engineTemperature > 125 and not engineFailedEffect then
-            if math.random() < ADS_Utils.getChancePerFrameFromMeanTime(spec.effectsUpdateTimer, 3) then
-                self:addBreakdown('ENGINE_JAM')
+        else
+            local engineFailedEffect = spec.activeEffects.ENGINE_FAILURE
+            if spec.engineTemperature > 125 and not engineFailedEffect then
+                if math.random() < ADS_Utils.getChancePerFrameFromMeanTime(spec.effectsUpdateTimer, 3) then
+                    self:addBreakdown('ENGINE_JAM')
+                end
             end
-       end
+        end
     end
 
     --- Cold engine message
@@ -1000,12 +1249,12 @@ function AdvancedDamageSystem:onUpdate(dt, ...)
     end
 
     --- ai worker overload, temp control
-    if ADS_Config.CORE.AI_OVERLOAD_AND_OVERHEAT_CONTROL then
+    if self.isServer and ADS_Config.CORE.AI_OVERLOAD_AND_OVERHEAT_CONTROL then
         self:updateAiWorkerCruiseControl(spec.effectsUpdateTimer)
     end
 
     --- Enables the thermal model for neutral vehicles on the map, should the player happen to use them
-    if ADS_Main and ADS_Main.vehicles and ADS_Main.vehicles[self.uniqueId] == nil and self:getIsControlled() then
+    if self.isServer and ADS_Main and ADS_Main.vehicles and ADS_Main.vehicles[self.uniqueId] == nil and self:getIsControlled() then
         self:updateThermalSystems(spec.effectsUpdateTimer)
     end
 
@@ -1022,7 +1271,7 @@ end
 
 function AdvancedDamageSystem:adsUpdate(dt, isWorkshopOpen)
     local spec = self.spec_AdvancedDamageSystem
-    if spec == nil then return end
+    if spec == nil or not self.isServer then return end
  
     self:updateThermalSystems(dt)
 
@@ -1037,6 +1286,8 @@ function AdvancedDamageSystem:adsUpdate(dt, isWorkshopOpen)
         self:updateConditionLevel(conditionWearRate, dt)
         self:updateServiceLevel(serviceWearRate, dt)
     end
+
+    markNetworkDirty(self)
 end
 
 -- ==========================================================
@@ -1255,6 +1506,7 @@ end
 ------------------- temperatures -------------------
 
 function AdvancedDamageSystem:updateThermalSystems(dt)
+    if not self.isServer then return end
     local motor = self:getMotor()
     if not motor then return end
 
@@ -1596,18 +1848,21 @@ function AdvancedDamageSystem:calculateWearRates()
 end
 
 function AdvancedDamageSystem:updateServiceLevel(wearRate, dt)
+    if not self.isServer then return end
     local spec = self.spec_AdvancedDamageSystem
     local newLevel = spec.serviceLevel - (wearRate * ADS_Config.CORE.BASE_SERVICE_WEAR / (60 * 60 * 1000) * dt)
     spec.serviceLevel = math.max(newLevel, 0)
 end
 
 function AdvancedDamageSystem:updateConditionLevel(wearRate, dt)
+    if not self.isServer then return end
     local spec = self.spec_AdvancedDamageSystem
     local newLevel = spec.conditionLevel - (wearRate * ADS_Config.CORE.BASE_CONDITION_WEAR / (60 * 60 * 1000) * dt)
     spec.conditionLevel = math.clamp(newLevel, 0.001, 1)
 end
 
 function AdvancedDamageSystem:updateConditionLevelCVTAddon(wearRate, amount, dt)
+    if not self.isServer then return end
     local spec = self.spec_AdvancedDamageSystem
     if wearRate ~= nil and wearRate > 0 then
         local newLevel = spec.conditionLevel - (wearRate * ADS_Config.CORE.BASE_CONDITION_WEAR / (60 * 60 * 1000) * dt)
@@ -1647,6 +1902,7 @@ end
 ---------------------- breakdowns ----------------------
 
 function AdvancedDamageSystem:checkForNewBreakdown(dt, conditionWearRate)
+    if not self.isServer then return end
     local spec = self.spec_AdvancedDamageSystem
     if not spec or dt == 0 then
         return
@@ -1756,6 +2012,7 @@ end
 
 
 function AdvancedDamageSystem:addBreakdown(breakdownId, stage)
+    if not self.isServer then return end
     log_dbg("addBreakdown called for", self:getFullName(), "with ID:", breakdownId, "and stage:", stage)
     local spec = self.spec_AdvancedDamageSystem
     if not spec then return end
@@ -1798,11 +2055,13 @@ function AdvancedDamageSystem:addBreakdown(breakdownId, stage)
     }
     
     self:recalculateAndApplyEffects()
+    markNetworkDirty(self)
     log_dbg("-> Successfully created breakdown.")
 end
 
 
 function AdvancedDamageSystem:removeBreakdown(...)
+    if not self.isServer then return end
     local spec = self.spec_AdvancedDamageSystem
     if not spec or next(spec.activeBreakdowns) == nil then
         return
@@ -1814,6 +2073,7 @@ function AdvancedDamageSystem:removeBreakdown(...)
         log_dbg("removeBreakdown called for", self:getFullName(), "with no arguments. Removing all breakdowns.")
         spec.activeBreakdowns = {}
         self:recalculateAndApplyEffects()
+        markNetworkDirty(self)
         log_dbg("-> removeBreakdown finished.")
         return
     end
@@ -1831,6 +2091,7 @@ function AdvancedDamageSystem:removeBreakdown(...)
     if removedCount > 0 then
         log_dbg("-> Removed", removedCount, "breakdown(s).")
         self:recalculateAndApplyEffects()
+        markNetworkDirty(self)
     else
         log_dbg("-> No matching breakdowns found to remove.")
     end
@@ -1848,6 +2109,7 @@ end
 
 
 function AdvancedDamageSystem:advanceBreakdown(breakdownId)
+    if not self.isServer then return end
     local spec = self.spec_AdvancedDamageSystem
     if not spec or not spec.activeBreakdowns or next(spec.activeBreakdowns) == nil or spec.activeBreakdowns[breakdownId] == nil then
         return
@@ -1859,11 +2121,13 @@ function AdvancedDamageSystem:advanceBreakdown(breakdownId)
     if breakdown.stage < #registryBreakdown.stages then
         breakdown.stage = breakdown.stage + 1
         self:recalculateAndApplyEffects()
+        markNetworkDirty(self)
     end
 end
 
 
 function AdvancedDamageSystem:processBreakdowns(dt)
+    if not self.isServer then return end
     local spec = self.spec_AdvancedDamageSystem
     if not spec or not spec.activeBreakdowns or next(spec.activeBreakdowns) == nil then
         return
@@ -1921,6 +2185,7 @@ function AdvancedDamageSystem:processBreakdowns(dt)
 
     if effectsNeedRecalculation then
         self:recalculateAndApplyEffects()
+        markNetworkDirty(self)
     end
 end
 
@@ -2153,7 +2418,7 @@ local function resetPendingServiceProgress(spec)
     spec.pendingOverhaulConditionTarget = nil
 end
 
-function AdvancedDamageSystem:initService(type, workshopType, optionOne, optionTwo, optionThree)
+function AdvancedDamageSystem:initService(type, workshopType, optionOne, optionTwo, optionThree, skipPayment)
     local spec = self.spec_AdvancedDamageSystem
     local states = AdvancedDamageSystem.STATUS
     local vehicleState = self:getCurrentStatus()
@@ -2161,6 +2426,11 @@ function AdvancedDamageSystem:initService(type, workshopType, optionOne, optionT
     local selectedBreakdowns = {}
     local totalTimeMs = 0
     local repairPrice = nil
+
+    if not self.isServer then
+        ADS_ServiceActionRequestEvent.sendInit(self, type, workshopType, optionOne, optionTwo, optionThree)
+        return false
+    end
 
     if self.spec_enterable ~= nil and self.spec_enterable.setIsTabbable ~= nil and C.PARK_VEHICLE then
         self.spec_enterable:setIsTabbable(false)
@@ -2257,7 +2527,17 @@ function AdvancedDamageSystem:initService(type, workshopType, optionOne, optionT
 
     spec.pendingSelectedBreakdowns = {}
 
-    spec.pendingServicePrice = repairPrice
+    local servicePrice = self:getServicePrice(type, optionOne, optionTwo, optionThree)
+    spec.pendingServicePrice = servicePrice
+
+    if skipPayment ~= true and servicePrice > 0 then
+        if g_currentMission:getMoney() < servicePrice then
+            spec.currentState = states.READY
+            resetPendingServiceProgress(spec)
+            return false
+        end
+        g_currentMission:addMoney(-1 * servicePrice, self:getOwnerFarmId(), MoneyType.VEHICLE_RUNNING_COSTS, true, true)
+    end
 
     if totalTimeMs > 0 then
         local adjustedTotalTimeMs = totalTimeMs / spec.reliability
@@ -2265,15 +2545,21 @@ function AdvancedDamageSystem:initService(type, workshopType, optionOne, optionT
         spec.pendingProgressTotalTime = adjustedTotalTimeMs
         spec.pendingProgressElapsedTime = 0
         spec.pendingProgressStepIndex = 0
+        markNetworkDirty(self)
         log_dbg(string.format('%s initiated for %s, will take %.2f seconds (%.2f seconds after reliability adjustment). Next planned state: %s', spec.currentState, self:getFullName(), totalTimeMs / 1000, spec.maintenanceTimer / 1000, spec.plannedState))
+        return true
     else
         spec.currentState = states.READY
         resetPendingServiceProgress(spec)
+        markNetworkDirty(self)
     end
+
+    return false
 end
 
 
 function AdvancedDamageSystem:processService(dt)
+    if not self.isServer then return end
     local spec = self.spec_AdvancedDamageSystem
     local states = AdvancedDamageSystem.STATUS
     local vehicleState = self:getCurrentStatus()
@@ -2356,6 +2642,8 @@ function AdvancedDamageSystem:processService(dt)
         spec.conditionLevel = math.max(spec.pendingOverhaulConditionStart, interpolatedCondition)
     end
 
+    markNetworkDirty(self)
+
     -- work done
     if spec.maintenanceTimer <= 0 then
         spec.maintenanceTimer = 0
@@ -2368,6 +2656,11 @@ function AdvancedDamageSystem:processService(dt)
 end
 
 function AdvancedDamageSystem:completeService()
+    if not self.isServer then
+        ADS_ServiceActionRequestEvent.sendComplete(self)
+        return
+    end
+
     local spec = self.spec_AdvancedDamageSystem
     local states = AdvancedDamageSystem.STATUS
     local serviceType = spec.currentState
@@ -2506,7 +2799,7 @@ function AdvancedDamageSystem:completeService()
 
             if repairQueueCount == 0 then
                 log_dbg("Planned REPAIR skipped: no visible selected breakdowns to repair.")
-                ADS_VehicleChangeStatusEvent.send(ADS_VehicleChangeStatusEvent.new(self))
+                ADS_VehicleChangeStatusEvent.send(self)
                 return
             end
         end
@@ -2514,10 +2807,10 @@ function AdvancedDamageSystem:completeService()
         local price = self:getServicePrice(nextWork, nextOptionOne, nextOptionTwo, nextOptionThree)
 
         if g_currentMission:getMoney() >= price then
-            self:initService(nextWork, spec.workshopType, nextOptionOne, nextOptionTwo, nextOptionThree)
+            self:initService(nextWork, spec.workshopType, nextOptionOne, nextOptionTwo, nextOptionThree, true)
             local started = spec.currentState == nextWork and (spec.maintenanceTimer or 0) > 0
 
-            ADS_VehicleChangeStatusEvent.send(ADS_VehicleChangeStatusEvent.new(self))
+            ADS_VehicleChangeStatusEvent.send(self)
 
             if started then
                 if price > 0 then
@@ -2531,7 +2824,7 @@ function AdvancedDamageSystem:completeService()
                 log_dbg("Planned service was requested but did not start. State:", tostring(spec.currentState), "Timer:", tostring(spec.maintenanceTimer))
             end
         else
-            ADS_VehicleChangeStatusEvent.send(ADS_VehicleChangeStatusEvent.new(self))
+            ADS_VehicleChangeStatusEvent.send(self)
             g_currentMission.hud:addSideNotification(
                 {1, 1, 1, 1},
                 string.format("%s: %s", self:getFullName(), string.format(g_i18n:getText('ads_spec_next_planned_service_not_enouth_money_notification'), g_i18n:getText(nextWork)))
@@ -2539,11 +2832,18 @@ function AdvancedDamageSystem:completeService()
         end
     else
         spec.currentState = states.READY
-        ADS_VehicleChangeStatusEvent.send(ADS_VehicleChangeStatusEvent.new(self))
+        ADS_VehicleChangeStatusEvent.send(self)
     end
+
+    markNetworkDirty(self)
 end
 
 function AdvancedDamageSystem:cancelService()
+    if not self.isServer then
+        ADS_ServiceActionRequestEvent.sendCancel(self)
+        return
+    end
+
     local spec = self.spec_AdvancedDamageSystem
     local states = AdvancedDamageSystem.STATUS
     local serviceType = spec.currentState
@@ -2583,7 +2883,8 @@ function AdvancedDamageSystem:cancelService()
     spec.serviceOptionTwo = nil
     spec.serviceOptionThree = false
 
-    ADS_VehicleChangeStatusEvent.send(ADS_VehicleChangeStatusEvent.new(self))
+    ADS_VehicleChangeStatusEvent.send(self)
+    markNetworkDirty(self)
 end
 
 function AdvancedDamageSystem:addEntryToMaintenanceLog(maintenanceType, optionOne, optionTwo, optionThree, price, isCompleted)
@@ -2654,8 +2955,10 @@ function AdvancedDamageSystem:getCurrentStatus()
 end
 
 function AdvancedDamageSystem:setNewStatus(status)
+    if not self.isServer then return end
     self.spec_AdvancedDamageSystem.currentState = status
-    ADS_VehicleChangeStatusEvent.send(ADS_VehicleChangeStatusEvent.new(self))
+    ADS_VehicleChangeStatusEvent.send(self)
+    markNetworkDirty(self)
 end
 
 
@@ -3198,6 +3501,11 @@ function AdvancedDamageSystem.ConsoleCommands:addBreakdown(rawArgs)
     local vehicle = self:getTargetVehicle()
     if not vehicle then return end
 
+    if not vehicle.isServer then
+        print("ADS Error: This command can only mutate ADS state on the server.")
+        return
+    end
+
     if not args or not args[1] then
         local randomId = vehicle:getRandomBreakdown()
         if randomId then
@@ -3238,6 +3546,11 @@ function AdvancedDamageSystem.ConsoleCommands:removeBreakdown(rawArgs)
     local vehicle = self:getTargetVehicle()
     if not vehicle then return end
 
+    if not vehicle.isServer then
+        print("ADS Error: This command can only mutate ADS state on the server.")
+        return
+    end
+
     if args and args[1] then
         local breakdownId = string.upper(args[1])
         vehicle:removeBreakdown(breakdownId)
@@ -3252,6 +3565,11 @@ function AdvancedDamageSystem.ConsoleCommands:advanceBreakdown(rawArgs)
     local vehicle = self:getTargetVehicle()
     if not vehicle then return end
 
+    if not vehicle.isServer then
+        print("ADS Error: This command can only mutate ADS state on the server.")
+        return
+    end
+
     local spec = vehicle.spec_AdvancedDamageSystem
     local advancedCount = 0
 
@@ -3264,8 +3582,8 @@ function AdvancedDamageSystem.ConsoleCommands:advanceBreakdown(rawArgs)
         for id, breakdown in pairs(vehicle:getActiveBreakdowns()) do
             local registryEntry = ADS_Breakdowns.BreakdownRegistry[id]
             if registryEntry and breakdown.stage < #registryEntry.stages then
-                breakdown.stage = breakdown.stage + 1
-                print(string.format("ADS: Advanced breakdown '%s' to stage %d.", id, breakdown.stage))
+                vehicle:advanceBreakdown(id)
+                print(string.format("ADS: Advanced breakdown '%s' to stage %d.", id, vehicle:getActiveBreakdowns()[id].stage))
                 advancedCount = advancedCount + 1
             else
                 print(string.format("ADS: Breakdown '%s' is already at its final stage.", breakdown.id))
@@ -3282,8 +3600,9 @@ function AdvancedDamageSystem.ConsoleCommands:advanceBreakdown(rawArgs)
 
         local registryEntry = ADS_Breakdowns.BreakdownRegistry[breakdownId]
         if registryEntry and foundBreakdown.stage < #registryEntry.stages then
-            foundBreakdown.stage = foundBreakdown.stage + 1
-            print(string.format("ADS: Advanced breakdown '%s' to stage %d.", foundBreakdown.id, foundBreakdown.stage))
+            vehicle:advanceBreakdown(breakdownId)
+            local updatedBreakdown = vehicle:getActiveBreakdowns()[breakdownId]
+            print(string.format("ADS: Advanced breakdown '%s' to stage %d.", breakdownId, updatedBreakdown and updatedBreakdown.stage or foundBreakdown.stage))
             advancedCount = advancedCount + 1
         else
             print(string.format("ADS: Breakdown '%s' is already at its final stage.", foundBreakdown.id))
@@ -3291,7 +3610,6 @@ function AdvancedDamageSystem.ConsoleCommands:advanceBreakdown(rawArgs)
     end
 
     if advancedCount > 0 then
-        vehicle:recalculateAndApplyEffects()
         print(string.format("ADS: Recalculated effects for '%s'.", vehicle:getFullName()))
     end
 end
@@ -3314,7 +3632,13 @@ function AdvancedDamageSystem.ConsoleCommands:setCondition(rawArgs)
         value = parsedValue
     end
     
+    if not vehicle.isServer then
+        print("ADS Error: This command can only mutate ADS state on the server.")
+        return
+    end
+
     spec.conditionLevel = value
+    markNetworkDirty(vehicle, true)
     print(string.format("ADS: Set Condition level for '%s' to %.2f.", vehicle:getFullName(), value))
 end
 
@@ -3336,7 +3660,13 @@ function AdvancedDamageSystem.ConsoleCommands:setService(rawArgs)
         value = parsedValue
     end
     
+    if not vehicle.isServer then
+        print("ADS Error: This command can only mutate ADS state on the server.")
+        return
+    end
+
     spec.serviceLevel = value
+    markNetworkDirty(vehicle, true)
     print(string.format("ADS: Set Service level for '%s' to %.2f.", vehicle:getFullName(), value))
 end
 
@@ -3346,9 +3676,15 @@ function AdvancedDamageSystem.ConsoleCommands:resetVehicle()
     if not vehicle then return end
     
     local spec = vehicle.spec_AdvancedDamageSystem
+    if not vehicle.isServer then
+        print("ADS Error: This command can only mutate ADS state on the server.")
+        return
+    end
+
     spec.conditionLevel = 1.0
     spec.serviceLevel = 1.0
     vehicle:removeBreakdown()
+    markNetworkDirty(vehicle, true)
     print(string.format("ADS: Fully reset state for '%s'.", vehicle:getFullName()))
 end
 
@@ -3357,6 +3693,11 @@ function AdvancedDamageSystem.ConsoleCommands:startMaintance(rawArgs)
     local args = parseArguments(rawArgs)
     local vehicle = self:getTargetVehicle()
     if not vehicle then return end
+
+    if not vehicle.isServer then
+        print("ADS Error: This command can only mutate ADS state on the server.")
+        return
+    end
 
     local spec = vehicle.spec_AdvancedDamageSystem
     if spec.currentState ~= AdvancedDamageSystem.STATUS.READY then
@@ -3448,6 +3789,11 @@ end
 function AdvancedDamageSystem.ConsoleCommands:finishMaintance()
     local vehicle = self:getTargetVehicle()
     if not vehicle then return end
+
+    if not vehicle.isServer then
+        print("ADS Error: This command can only mutate ADS state on the server.")
+        return
+    end
 
     local spec = vehicle.spec_AdvancedDamageSystem
     if spec.currentState == AdvancedDamageSystem.STATUS.READY then

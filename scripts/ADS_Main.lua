@@ -12,6 +12,7 @@ source(g_currentModDirectory .. "scripts/ADS_Hud.lua")
 source(g_currentModDirectory .. "scripts/ADS_InGameSettings.lua")
 source(g_currentModDirectory .. "events/ADS_VehicleChangeStatusEvent.lua")
 source(g_currentModDirectory .. "events/ADS_WorkshopChangeStatusEvent.lua")
+source(g_currentModDirectory .. "events/ADS_ServiceActionRequestEvent.lua")
 
 
 local function log_dbg(...)
@@ -80,28 +81,29 @@ end
 -- ==========================================================
 
 function ADS_Main:onStartMission()
-    
-    ADS_WorkshopDialog.register()
-    ADS_MaintenanceLogDialog.register()
-    ADS_ReportDialog.register()
-    ADS_MaintenanceTwoOptionsDialog.register()
-    ADS_MaintenanceThreeOptionsDialog.register()
+    if not g_dedicatedServer then
+        ADS_WorkshopDialog.register()
+        ADS_MaintenanceLogDialog.register()
+        ADS_ReportDialog.register()
+        ADS_MaintenanceTwoOptionsDialog.register()
+        ADS_MaintenanceThreeOptionsDialog.register()
 
-    local mission = g_currentMission
-    ADS_Main.hud = ADS_Hud:new()
-    ADS_Main.hud:setScale(g_gameSettings:getValue(GameSettings.SETTING.UI_SCALE))
-	ADS_Main.hud:setVehicle(nil)
+        local mission = g_currentMission
+        ADS_Main.hud = ADS_Hud:new()
+        ADS_Main.hud:setScale(g_gameSettings:getValue(GameSettings.SETTING.UI_SCALE))
+	    ADS_Main.hud:setVehicle(nil)
 
-	table.insert(mission.hud.displayComponents, ADS_Main.hud)
+	    table.insert(mission.hud.displayComponents, ADS_Main.hud)
 
-	mission.hud.setControlledVehicle = Utils.appendedFunction(mission.hud.setControlledVehicle, function(self, vehicle)
-		ADS_Main.hud:setVehicle(vehicle)
-		ADS_Main.hud:setVisible(vehicle ~= nil and vehicle.spec_AdvancedDamageSystem ~= nil, true)
-	end)
+	    mission.hud.setControlledVehicle = Utils.appendedFunction(mission.hud.setControlledVehicle, function(self, vehicle)
+		    ADS_Main.hud:setVehicle(vehicle)
+		    ADS_Main.hud:setVisible(vehicle ~= nil and vehicle.spec_AdvancedDamageSystem ~= nil, true)
+	    end)
 
-	mission.hud.drawControlledEntityHUD = Utils.appendedFunction(mission.hud.drawControlledEntityHUD, function(self)
-		ADS_Main.hud:draw()
-	end)
+	    mission.hud.drawControlledEntityHUD = Utils.appendedFunction(mission.hud.drawControlledEntityHUD, function(self)
+		    ADS_Main.hud:draw()
+	    end)
+    end
 
     -- spec list damage fix (store and garage overwiev)
     for _, spec in ipairs(g_storeManager.specTypes) do
@@ -241,7 +243,7 @@ ADS_Main.workshopCheckTimer = 0
 ADS_Main.isWorkshopOpen = true
 
 function ADS_Main:update(dt)
-    if ADS_WorkshopDialog.INSTANCE ~= nil and ADS_WorkshopDialog.INSTANCE.isDialogOpen then
+    if not g_dedicatedServer and ADS_WorkshopDialog.INSTANCE ~= nil and ADS_WorkshopDialog.INSTANCE.isDialogOpen then
         ADS_WorkshopDialog.INSTANCE:updateServiceProgressText()
     end
 
@@ -259,7 +261,7 @@ function ADS_Main:update(dt)
         local isWorkshopOpen = ADS_Config.WORKSHOP.ALWAYS_AVAILABLE or (currentDayHour >= ADS_Config.WORKSHOP.OPEN_HOUR and currentDayHour < ADS_Config.WORKSHOP.CLOSE_HOUR)
         if isWorkshopOpen ~= self.isWorkshopOpen then
             self.isWorkshopOpen = isWorkshopOpen
-            ADS_WorkshopChangeStatusEvent.send(ADS_VehicleChangeStatusEvent.new(self.isWorkshopOpen))
+            ADS_WorkshopChangeStatusEvent.send(self.isWorkshopOpen)
         end
          self.workshopCheckTimer = self.workshopCheckTimer - ADS_Config.CORE_UPDATE_DELAY 
     end
@@ -286,6 +288,7 @@ function ADS_Main:update(dt)
             --- meta
             local spec = vehicle.spec_AdvancedDamageSystem
             spec.metaUpdateTimer = spec.metaUpdateTimer + ADS_Config.CORE_UPDATE_DELAY
+
             if spec.metaUpdateTimer > ADS_Config.META_UPDATE_DELAY then
                 --vehicle:processPermanentEffects(spec.metaUpdateTimer)
                 spec.metaUpdateTimer = spec.metaUpdateTimer - ADS_Config.META_UPDATE_DELAY
