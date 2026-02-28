@@ -1053,21 +1053,24 @@ function AdvancedDamageSystem:onPostLoad(savegame)
         local modDir = AdvancedDamageSystem.modDirectory
         local root = self.rootNode
         local i3d = self.i3dMappings
-        
-        spec.samples.starter = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "starter", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.alarm = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "alarm", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.transmissionShiftFailed1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "transmissionShiftFailed1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.transmissionShiftFailed2 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "transmissionShiftFailed2", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.transmissionShiftFailed3 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "transmissionShiftFailed3", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.brakes1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "brakes1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.brakes2 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "brakes2", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.brakes3 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "brakes3", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.turbocharger1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.turbocharger2 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger2", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.turbocharger3 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger3", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.turbocharger4 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger4", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.gearDisengage1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "gearDisengage1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.maintenanceCompleted = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "maintenanceCompleted", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+
+        if soundManager ~= nil and soundManager.loadSampleFromXML ~= nil then
+            spec.samples.starter = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "starter", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.alarm = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "alarm", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.transmissionShiftFailed1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "transmissionShiftFailed1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.transmissionShiftFailed2 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "transmissionShiftFailed2", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.transmissionShiftFailed3 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "transmissionShiftFailed3", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.brakes1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "brakes1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.brakes2 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "brakes2", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.brakes3 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "brakes3", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.turbocharger1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.turbocharger2 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger2", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.turbocharger3 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger3", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.turbocharger4 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger4", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.gearDisengage1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "gearDisengage1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.maintenanceCompleted = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "maintenanceCompleted", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+        end
+
         delete(xmlSoundFile)
     else
         log_dbg("ERROR: AdvancedDamageSystem - Could not load ads_sounds.xml")
@@ -1121,7 +1124,7 @@ function AdvancedDamageSystem:onDelete()
     log_dbg("onDelete called for vehicle:", self:getFullName(), "ID:", self.uniqueId)
     local spec = self.spec_AdvancedDamageSystem
 
-    if spec and spec.samples then
+    if spec and spec.samples and g_soundManager ~= nil and g_soundManager.deleteSamples ~= nil then
         g_soundManager:deleteSamples(spec.samples)
         log_dbg(" -> Sound samples deleted.")
     end
