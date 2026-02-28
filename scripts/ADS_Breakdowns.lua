@@ -9,6 +9,11 @@ local function log_dbg(...)
         print("[ADS_BREAKDOWNS] " .. table.concat(args, " "))
     end
 end
+local function playSampleSafe(sample)
+    if g_soundManager ~= nil and g_soundManager.playSample ~= nil and sample ~= nil then
+        g_soundManager:playSample(sample)
+    end
+end
 
 ADS_Breakdowns.DASHBOARD = {
     ENGINE = "engine",
@@ -2211,7 +2216,7 @@ ADS_Breakdowns.EffectApplicators.TURBOCHARGER_GRINDING_EFFECT = {
         local activeFunc = function(v, dt)
             if motor.lastTurboScale > 0.1 and not effectData.extraData.soundPlayed then
                 if math.random() < effectData.value then
-                    g_soundManager:playSample(v.spec_AdvancedDamageSystem.samples['turbocharger' .. math.random(4)])
+                    playSampleSafe(v.spec_AdvancedDamageSystem.samples['turbocharger' .. math.random(4)])
                 end
                 effectData.extraData.soundPlayed = true
                 effectData.extraData.timer = 10000
@@ -2283,7 +2288,7 @@ ADS_Breakdowns.EffectApplicators.ENGINE_START_FAILURE_CHANCE = {
                 local effect = v.spec_AdvancedDamageSystem.activeEffects.ENGINE_START_FAILURE_CHANCE
                 if effect and effect.value > 0 then
                     if effect.extraData.status == "CRANKING" then
-                        g_soundManager:playSample(v.spec_AdvancedDamageSystem.samples.starter)
+                        playSampleSafe(v.spec_AdvancedDamageSystem.samples.starter)
                         effect.extraData.status = "PASSED"
                     end
                     if effect.extraData.status == "PASSED" then
@@ -2328,7 +2333,7 @@ ADS_Breakdowns.EffectApplicators.GEAR_SHIFT_FAILURE_CHANCE = {
                 log_dbg("GEAR SHIFT FAILED! (shiftGear)")
                 effectData.extraData.status = "FAILED"
                 if m.vehicle and m.vehicle.spec_AdvancedDamageSystem and effectData.value < 1.0 then
-                    g_soundManager:playSample(vehicle.spec_AdvancedDamageSystem.samples['transmissionShiftFailed' .. math.random(3)])
+                    playSampleSafe(vehicle.spec_AdvancedDamageSystem.samples['transmissionShiftFailed' .. math.random(3)])
                 end
                 return
             end
@@ -2349,7 +2354,7 @@ ADS_Breakdowns.EffectApplicators.GEAR_SHIFT_FAILURE_CHANCE = {
                     effectData.extraData.status = "FAILED"
                     log_dbg("GEAR SHIFT FAILED! (selectGear)")
                     if m.vehicle and m.vehicle.spec_AdvancedDamageSystem and effectData.value < 1.0 then
-                       g_soundManager:playSample(vehicle.spec_AdvancedDamageSystem.samples['transmissionShiftFailed' .. math.random(3)])
+                       playSampleSafe(vehicle.spec_AdvancedDamageSystem.samples['transmissionShiftFailed' .. math.random(3)])
                     end
                     return
                 end
@@ -2380,7 +2385,7 @@ ADS_Breakdowns.EffectApplicators.GEAR_SHIFT_FAILURE_CHANCE = {
                     m.autoGearChangeTimer = effectData.extraData.duration
                     
                     if m.vehicle and m.vehicle.spec_AdvancedDamageSystem and effectData.value < 1.0 then
-                        g_soundManager:playSample(vehicle.spec_AdvancedDamageSystem.samples['transmissionShiftFailed' .. math.random(3)])
+                        playSampleSafe(vehicle.spec_AdvancedDamageSystem.samples['transmissionShiftFailed' .. math.random(3)])
                     end
                     
                     if effectData.value >= 1.0 then
@@ -2465,7 +2470,7 @@ ADS_Breakdowns.EffectApplicators.GEAR_REJECTION_CHANCE = {
                         effect.extraData.timer = effect.extraData.timer + dt
                         if effect.extraData.timer >= effect.extraData.duration then
                             effect.extraData.status = 'IDLE'
-                            g_soundManager:playSample(vehicle.spec_AdvancedDamageSystem.samples['transmissionShiftFailed' .. math.random(3)])
+                            playSampleSafe(vehicle.spec_AdvancedDamageSystem.samples['transmissionShiftFailed' .. math.random(3)])
                         end
                     elseif v:getMotorLoadPercentage() > 0.8 and effect.extraData.status == 'IDLE' then
                         if math.random() < ADS_Utils.getChancePerFrameFromMeanTime(dt, effect.value) then
@@ -2474,7 +2479,7 @@ ADS_Breakdowns.EffectApplicators.GEAR_REJECTION_CHANCE = {
                             if motor and motor.setGear then
                                 motor:setGear(0, false)
                                 if v.getIsControlled ~= nil and v:getIsControlled() then
-                                    g_soundManager:playSample(v.spec_AdvancedDamageSystem.samples.gearDisengage1)
+                                    playSampleSafe(v.spec_AdvancedDamageSystem.samples.gearDisengage1)
                                     g_currentMission:showBlinkingWarning(g_i18n:getText("ads_breakdowns_gear_disengage_message", 3000)) 
                                 end
                             end
@@ -2633,8 +2638,8 @@ function ADS_Breakdowns.startMotor(self, superFunc, noEventSend)
         if self.spec_AdvancedDamageSystem.activeEffects.ENGINE_FAILURE then
             local engineFailureEffect = spec.activeEffects.ENGINE_FAILURE
             if (engineFailureEffect and engineFailureEffect.value >= 1.0) then
-                if not g_soundManager:getIsSamplePlaying(spec.samples.starter) then
-                    g_soundManager:playSample(spec.samples.starter)
+                if g_soundManager == nil or g_soundManager.getIsSamplePlaying == nil or not g_soundManager:getIsSamplePlaying(spec.samples.starter) then
+                    playSampleSafe(spec.samples.starter)
                 end 
                 return
             end
@@ -2824,7 +2829,7 @@ function ADS_Breakdowns.updateVehiclePhysics(vehicle, superFunc, axisForward, ax
             if brakeEffect.extraData ~= nil and vehicle:getLastSpeed() < 15 then
                 if not brakeEffect.extraData.soundPlayed and math.abs(origAxisForward) > 0.999 then
                     if math.random() < brakeEffect.value then
-                        g_soundManager:playSample(spec_ads.samples['brakes' .. math.random(3)])
+                        playSampleSafe(spec_ads.samples['brakes' .. math.random(3)])
                     end
                     brakeEffect.extraData.soundPlayed = true
                     brakeEffect.extraData.timer = 1500
