@@ -11,7 +11,7 @@ Advanced Damage System is a complete overhaul of the vehicle maintenance system,
 >
 > *   This mod is a work in progress (WIP). Features are subject to change, and bugs are to be expected.
 > *   Use at your own risk. The author is not responsible for any potential issues with your savegame or game. It is strongly recommended to back up your saves.
-> *   Multiplayer (MP) is not currently supported. Support is planned for a future release.
+> *   Multiplayer (MP) support is now available in the current build. Please report any desync issues you encounter so they can be fixed quickly.
 
 </td>
 <td width="35%" align="center" valign="top">

@@ -184,7 +184,6 @@ function ADS_MaintenanceThreeOptionsDialog:onClickStartService()
     end
 
     vehicle:initService(self.maintenanceType, workshopType, self.selectedOptionOne, self.selectedOptionTwo, self.selectedOptionThree)
-    g_currentMission:addMoney(-1 * price, vehicle:getOwnerFarmId(), MoneyType.VEHICLE_RUNNING_COSTS, true, true)
 
     self:close()
 end
