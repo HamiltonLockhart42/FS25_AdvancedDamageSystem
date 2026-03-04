@@ -3,13 +3,15 @@ ADS_Main = {}
 source(g_currentModDirectory .. "scripts/ADS_Config.lua")
 source(g_currentModDirectory .. "scripts/ADS_Utils.lua")
 source(g_currentModDirectory .. "scripts/ADS_Breakdowns.lua")
-source(g_currentModDirectory .. "gui/ADS_WorkshopDialog.lua")
-source(g_currentModDirectory .. "gui/ADS_MaintenanceLogDialog.lua")
-source(g_currentModDirectory .. "gui/ADS_ReportDialog.lua")
-source(g_currentModDirectory .. "gui/ADS_MaintenanceTwoOptionsDialog.lua")
-source(g_currentModDirectory .. "gui/ADS_MaintenanceThreeOptionsDialog.lua")
-source(g_currentModDirectory .. "scripts/ADS_Hud.lua")
-source(g_currentModDirectory .. "scripts/ADS_InGameSettings.lua")
+if not g_dedicatedServer then
+    source(g_currentModDirectory .. "gui/ADS_WorkshopDialog.lua")
+    source(g_currentModDirectory .. "gui/ADS_MaintenanceLogDialog.lua")
+    source(g_currentModDirectory .. "gui/ADS_ReportDialog.lua")
+    source(g_currentModDirectory .. "gui/ADS_MaintenanceTwoOptionsDialog.lua")
+    source(g_currentModDirectory .. "gui/ADS_MaintenanceThreeOptionsDialog.lua")
+    source(g_currentModDirectory .. "scripts/ADS_Hud.lua")
+    source(g_currentModDirectory .. "scripts/ADS_InGameSettings.lua")
+end
 source(g_currentModDirectory .. "events/ADS_VehicleChangeStatusEvent.lua")
 source(g_currentModDirectory .. "events/ADS_WorkshopChangeStatusEvent.lua")
 source(g_currentModDirectory .. "events/ADS_ServiceActionRequestEvent.lua")
@@ -156,9 +158,11 @@ local function getMaintainability(storeItem)
     end
 end
 
--- adds spec while browsing
-g_storeManager:addSpecType("reliability", "shopListAttributeIconReliability", nil, getReliability, StoreSpecies.VEHICLE)
-g_storeManager:addSpecType("maintainability", "shopListAttributeIconMaintainability", nil, getMaintainability, StoreSpecies.VEHICLE)
+if not g_dedicatedServer then
+    -- adds spec while browsing
+    g_storeManager:addSpecType("reliability", "shopListAttributeIconReliability", nil, getReliability, StoreSpecies.VEHICLE)
+    g_storeManager:addSpecType("maintainability", "shopListAttributeIconMaintainability", nil, getMaintainability, StoreSpecies.VEHICLE)
+end
 
 
 -- adds spec in config screen 
@@ -223,10 +227,12 @@ end
 
 
 FSBaseMission.onStartMission = Utils.prependedFunction(FSBaseMission.onStartMission, ADS_Main.onStartMission)
-WorkshopScreen.setVehicle = Utils.appendedFunction(WorkshopScreen.setVehicle, ADS_Main.hookRepairButton)
-WorkshopScreen.setStatusBarValue = Utils.overwrittenFunction(WorkshopScreen.setStatusBarValue, ADS_Main.setStatusBarValue)
-InGameMenuStatisticsFrame.populateCellForItemInSection = Utils.overwrittenFunction(InGameMenuStatisticsFrame.populateCellForItemInSection, ADS_Main.populateCellForItemInSection)
-ShopConfigScreen.processAttributeData = Utils.appendedFunction(ShopConfigScreen.processAttributeData, ADS_Main.processAttributeData)
+if not g_dedicatedServer then
+    WorkshopScreen.setVehicle = Utils.appendedFunction(WorkshopScreen.setVehicle, ADS_Main.hookRepairButton)
+    WorkshopScreen.setStatusBarValue = Utils.overwrittenFunction(WorkshopScreen.setStatusBarValue, ADS_Main.setStatusBarValue)
+    InGameMenuStatisticsFrame.populateCellForItemInSection = Utils.overwrittenFunction(InGameMenuStatisticsFrame.populateCellForItemInSection, ADS_Main.populateCellForItemInSection)
+    ShopConfigScreen.processAttributeData = Utils.appendedFunction(ShopConfigScreen.processAttributeData, ADS_Main.processAttributeData)
+end
 
 
 ADS_Main.initSpec()
@@ -299,5 +305,4 @@ function ADS_Main:update(dt)
 end
 
 addModEventListener(ADS_Main)
-
 

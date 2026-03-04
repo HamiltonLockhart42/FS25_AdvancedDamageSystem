@@ -102,6 +102,20 @@ local function log_dbg(...)
     end
 end
 
+
+local function addSideNotificationSafe(color, text)
+    local mission = g_currentMission
+    if mission ~= nil and mission.hud ~= nil and mission.hud.addSideNotification ~= nil then
+        mission.hud:addSideNotification(color, text)
+    end
+end
+
+local function playSampleSafe(sample)
+    if g_soundManager ~= nil and g_soundManager.playSample ~= nil and sample ~= nil then
+        g_soundManager:playSample(sample)
+    end
+end
+
 local function normalizeBoolValue(value, defaultValue)
     if value == nil then
         return defaultValue == true
@@ -320,17 +334,6 @@ local function writeAdsNetworkState(vehicle, streamId)
     streamWriteBool(streamId, spec.serviceOptionThree == true)
     streamWriteBool(streamId, ADS_Main ~= nil and ADS_Main.isWorkshopOpen == true)
 
-    streamWriteUIntN(streamId, (spec.lastServiceDate and spec.lastServiceDate.day) and math.max(0, spec.lastServiceDate.day) or 0, 6)
-    streamWriteUIntN(streamId, (spec.lastServiceDate and spec.lastServiceDate.month) and math.max(0, spec.lastServiceDate.month) or 0, 4)
-    streamWriteUIntN(streamId, (spec.lastServiceDate and spec.lastServiceDate.year) and math.max(0, spec.lastServiceDate.year) or 0, 12)
-
-    streamWriteUIntN(streamId, (spec.lastInspectionDate and spec.lastInspectionDate.day) and math.max(0, spec.lastInspectionDate.day) or 0, 6)
-    streamWriteUIntN(streamId, (spec.lastInspectionDate and spec.lastInspectionDate.month) and math.max(0, spec.lastInspectionDate.month) or 0, 4)
-    streamWriteUIntN(streamId, (spec.lastInspectionDate and spec.lastInspectionDate.year) and math.max(0, spec.lastInspectionDate.year) or 0, 12)
-
-    streamWriteFloat32(streamId, spec.lastInspectedConditionValue or 0)
-    streamWriteFloat32(streamId, spec.lastInspectedServiceValue or 0)
-
     ensureBreakdownNetMaps()
     local activeBreakdowns = spec.activeBreakdowns or {}
     local count = 0
@@ -379,21 +382,6 @@ local function readAdsNetworkState(vehicle, streamId)
     if ADS_Main ~= nil then
         ADS_Main.isWorkshopOpen = workshopOpen
     end
-
-    spec.lastServiceDate = {
-        day = streamReadUIntN(streamId, 6),
-        month = streamReadUIntN(streamId, 4),
-        year = streamReadUIntN(streamId, 12)
-    }
-
-    spec.lastInspectionDate = {
-        day = streamReadUIntN(streamId, 6),
-        month = streamReadUIntN(streamId, 4),
-        year = streamReadUIntN(streamId, 12)
-    }
-
-    spec.lastInspectedConditionValue = streamReadFloat32(streamId)
-    spec.lastInspectedServiceValue = streamReadFloat32(streamId)
 
     ensureBreakdownNetMaps()
     local breakdownCount = streamReadUIntN(streamId, 10)
@@ -1075,21 +1063,24 @@ function AdvancedDamageSystem:onPostLoad(savegame)
         local modDir = AdvancedDamageSystem.modDirectory
         local root = self.rootNode
         local i3d = self.i3dMappings
-        
-        spec.samples.starter = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "starter", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.alarm = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "alarm", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.transmissionShiftFailed1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "transmissionShiftFailed1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.transmissionShiftFailed2 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "transmissionShiftFailed2", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.transmissionShiftFailed3 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "transmissionShiftFailed3", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.brakes1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "brakes1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.brakes2 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "brakes2", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.brakes3 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "brakes3", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.turbocharger1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.turbocharger2 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger2", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.turbocharger3 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger3", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.turbocharger4 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger4", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.gearDisengage1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "gearDisengage1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
-        spec.samples.maintenanceCompleted = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "maintenanceCompleted", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+
+        if soundManager ~= nil and soundManager.loadSampleFromXML ~= nil then
+            spec.samples.starter = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "starter", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.alarm = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "alarm", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.transmissionShiftFailed1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "transmissionShiftFailed1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.transmissionShiftFailed2 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "transmissionShiftFailed2", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.transmissionShiftFailed3 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "transmissionShiftFailed3", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.brakes1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "brakes1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.brakes2 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "brakes2", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.brakes3 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "brakes3", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.turbocharger1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.turbocharger2 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger2", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.turbocharger3 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger3", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.turbocharger4 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "turbocharger4", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.gearDisengage1 = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "gearDisengage1", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+            spec.samples.maintenanceCompleted = soundManager:loadSampleFromXML(xmlSoundFile, "sounds", "maintenanceCompleted", modDir, root, 1, AudioGroup.VEHICLE, i3d, self)
+        end
+
         delete(xmlSoundFile)
     else
         log_dbg("ERROR: AdvancedDamageSystem - Could not load ads_sounds.xml")
@@ -1143,7 +1134,7 @@ function AdvancedDamageSystem:onDelete()
     log_dbg("onDelete called for vehicle:", self:getFullName(), "ID:", self.uniqueId)
     local spec = self.spec_AdvancedDamageSystem
 
-    if spec and spec.samples then
+    if spec and spec.samples and g_soundManager ~= nil and g_soundManager.deleteSamples ~= nil then
         g_soundManager:deleteSamples(spec.samples)
         log_dbg(" -> Sound samples deleted.")
     end
@@ -1225,7 +1216,7 @@ function AdvancedDamageSystem:onUpdate(dt, ...)
                 if (spec.transmissionTemperature > 105 or spec.engineTemperature > 105) and not overheatProtection then
                     self:addBreakdown(overheatProtectionId, 1)
                     if self.getIsControlled ~= nil and self:getIsControlled() then
-                        g_soundManager:playSample(spec.samples.alarm)
+                        playSampleSafe(spec.samples.alarm)
                     end
                 elseif overheatProtection then
                     if self:getCruiseControlState() ~= 0 then
@@ -1234,17 +1225,17 @@ function AdvancedDamageSystem:onUpdate(dt, ...)
                     if (spec.transmissionTemperature > 125 or spec.engineTemperature > 125) and overheatProtection.stage < 4 then
                         self:advanceBreakdown(overheatProtectionId)
                         if self.getIsControlled ~= nil and self:getIsControlled() then
-                            g_soundManager:playSample(spec.samples.alarm)
+                            playSampleSafe(spec.samples.alarm)
                         end
                     elseif (spec.transmissionTemperature > 115 or spec.engineTemperature > 115) and overheatProtection.stage < 3 then
                         self:advanceBreakdown(overheatProtectionId)
                         if self.getIsControlled ~= nil and self:getIsControlled() then
-                            g_soundManager:playSample(spec.samples.alarm)
+                            playSampleSafe(spec.samples.alarm)
                         end
                     elseif (spec.transmissionTemperature > 110 or spec.engineTemperature > 110) and overheatProtection.stage < 2 then
                         self:advanceBreakdown(overheatProtectionId)
                         if self.getIsControlled ~= nil and self:getIsControlled() then
-                            g_soundManager:playSample(spec.samples.alarm)
+                            playSampleSafe(spec.samples.alarm)
                         end
                     end
                 end
@@ -2320,7 +2311,7 @@ function AdvancedDamageSystem:recalculateAndApplyEffects()
                 applicator.apply(self, spec.activeEffects[effectId], applicator)
                 local currentEffect = spec.activeEffects[effectId]
                 if currentEffect and currentEffect.extraData ~= nil and currentEffect.extraData.message ~= nil and self.getIsControlled ~= nil and not self:getIsControlled() then
-                    g_currentMission.hud:addSideNotification(ADS_Breakdowns.COLORS.WARNING, self:getFullName() .. ": " .. g_i18n:getText(currentEffect.extraData.message))
+                    addSideNotificationSafe(ADS_Breakdowns.COLORS.WARNING, self:getFullName() .. ": " .. g_i18n:getText(currentEffect.extraData.message))
                 end
             end
         elseif wasPreviouslyActive then
@@ -2814,8 +2805,8 @@ function AdvancedDamageSystem:completeService()
         end
     end
 
-    g_currentMission.hud:addSideNotification({1, 1, 1, 1}, maintenanceCompletedText)
-    g_soundManager:playSample(spec.samples.maintenanceCompleted)
+    addSideNotificationSafe({1, 1, 1, 1}, maintenanceCompletedText)
+    playSampleSafe(spec.samples.maintenanceCompleted)
 
     spec.maintenanceTimer = 0
     resetPendingServiceProgress(spec)
@@ -2867,7 +2858,7 @@ function AdvancedDamageSystem:completeService()
                 if price > 0 then
                     g_currentMission:addMoney(-1 * price, self:getOwnerFarmId(), MoneyType.VEHICLE_RUNNING_COSTS, true, true)
                 end
-                g_currentMission.hud:addSideNotification(
+                addSideNotificationSafe(
                     {1, 1, 1, 1},
                     string.format("%s: %s", self:getFullName(), string.format(g_i18n:getText('ads_spec_next_planned_service_notification'), g_i18n:getText(nextWork)))
                 )
@@ -2876,7 +2867,7 @@ function AdvancedDamageSystem:completeService()
             end
         else
             ADS_VehicleChangeStatusEvent.send(self)
-            g_currentMission.hud:addSideNotification(
+            addSideNotificationSafe(
                 {1, 1, 1, 1},
                 string.format("%s: %s", self:getFullName(), string.format(g_i18n:getText('ads_spec_next_planned_service_not_enouth_money_notification'), g_i18n:getText(nextWork)))
             )
@@ -2921,7 +2912,7 @@ function AdvancedDamageSystem:cancelService()
         self.spec_enterable:setIsTabbable(true)
     end
 
-    g_currentMission.hud:addSideNotification(
+    addSideNotificationSafe(
         {1, 1, 1, 1},
         string.format("%s: %s %s", self:getFullName(), g_i18n:getText(serviceType), g_i18n:getText("ads_spec_maintenance_cancelled_notification"))
     )
