@@ -10,7 +10,7 @@
     <en>Adds realistic wear, breakdowns, inspections, maintenance, and repair workflows with logs and service reports.</en>
 </description>
 <iconFilename>icon_ads.dds</iconFilename>
-<multiplayer supported="false"/>
+<multiplayer supported="true"/>
 <extraSourceFiles>
     <sourceFile filename="scripts/ADS_Main.lua"/>
 </extraSourceFiles>

@@ -167,8 +167,6 @@ end
 function ADS_MaintenanceTwoOptionsDialog:onClickStartService()
     local vehicle = self.vehicle
     local workshopType = ADS_WorkshopDialog.INSTANCE.workshopType
-    local spec = vehicle.spec_AdvancedDamageSystem
-    
     local price = vehicle:getServicePrice(self.maintenanceType, self.selectedOptionOne, self.selectedOptionTwo, self.selectedOptionThree, workshopType)
     
     if g_currentMission:getMoney() < price then
@@ -176,12 +174,7 @@ function ADS_MaintenanceTwoOptionsDialog:onClickStartService()
         return
     end
     
-    spec.serviceOptionOne = self.selectedOptionOne
-    spec.serviceOptionTwo = self.selectedOptionTwo
-    spec.serviceOptionThree = self.selectedOptionThree
-
     vehicle:initService(self.maintenanceType, workshopType, self.selectedOptionOne, self.selectedOptionTwo, self.selectedOptionThree)
-    g_currentMission:addMoney(-1 * price, vehicle:getOwnerFarmId(), MoneyType.VEHICLE_RUNNING_COSTS, true, true)
     
     self:close()
 end
