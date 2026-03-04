@@ -437,6 +437,8 @@ function AdvancedDamageSystem.initSpecialization()
     schemaSavegame:register(XMLValueType.FLOAT,  baseKey .. "#lastServiceOpHours", "Last Service Operating Hours")
     schemaSavegame:register(XMLValueType.STRING, baseKey .. "#lastInspCond", "Last Inspected Condition State")
     schemaSavegame:register(XMLValueType.STRING, baseKey .. "#lastInspServ", "Last Inspected Service State")
+    schemaSavegame:register(XMLValueType.FLOAT,  baseKey .. "#lastInspCondValue", "Last Inspected Condition Value")
+    schemaSavegame:register(XMLValueType.FLOAT,  baseKey .. "#lastInspServValue", "Last Inspected Service Value")
     schemaSavegame:register(XMLValueType.FLOAT,  baseKey .. "#lastInspPwr", "Last Inspected Power")
     schemaSavegame:register(XMLValueType.FLOAT,  baseKey .. "#lastInspBrk", "Last Inspected Brake")
     schemaSavegame:register(XMLValueType.FLOAT,  baseKey .. "#lastInspYld", "Last Inspected Yield Reduction")
@@ -585,6 +587,8 @@ function AdvancedDamageSystem:saveToXMLFile(xmlFile, key, usedModNames)
         xmlFile:setValue(key .. "#lastServiceOpHours", spec.lastServiceOperatingHours)
         xmlFile:setValue(key .. "#lastInspCond", spec.lastInspectedConditionState)
         xmlFile:setValue(key .. "#lastInspServ", spec.lastInspectedServiceState)
+        xmlFile:setValue(key .. "#lastInspCondValue", spec.lastInspectedConditionValue or 0)
+        xmlFile:setValue(key .. "#lastInspServValue", spec.lastInspectedServiceValue or 0)
         xmlFile:setValue(key .. "#engineTemperature", spec.engineTemperature)
         xmlFile:setValue(key .. "#transmissionTemperature", spec.transmissionTemperature)
         xmlFile:setValue(key .. "#lastInspPwr", spec.lastInspectedPower)
@@ -693,6 +697,8 @@ function AdvancedDamageSystem:onLoad(savegame)
     self.spec_AdvancedDamageSystem.lastServiceOperatingHours = 0
     self.spec_AdvancedDamageSystem.lastInspectedConditionState = AdvancedDamageSystem.STATES.UNKNOWN
     self.spec_AdvancedDamageSystem.lastInspectedServiceState = AdvancedDamageSystem.STATES.UNKNOWN
+    self.spec_AdvancedDamageSystem.lastInspectedConditionValue = 0
+    self.spec_AdvancedDamageSystem.lastInspectedServiceValue = 0
     self.spec_AdvancedDamageSystem.lastInspectedPower = 1
     self.spec_AdvancedDamageSystem.lastInspectedBrake = 1
     self.spec_AdvancedDamageSystem.lastInspectedYieldReduction = 1
@@ -851,6 +857,8 @@ function AdvancedDamageSystem:onPostLoad(savegame)
         spec.lastServiceOperatingHours = savegame.xmlFile:getValue(key .. "#lastServiceOpHours", spec.lastServiceOperatingHours)
         spec.lastInspectedConditionState = savegame.xmlFile:getValue(key .. "#lastInspCond", spec.lastInspectedConditionState)
         spec.lastInspectedServiceState = savegame.xmlFile:getValue(key .. "#lastInspServ", spec.lastInspectedServiceState)
+        spec.lastInspectedConditionValue = savegame.xmlFile:getValue(key .. "#lastInspCondValue", spec.lastInspectedConditionValue)
+        spec.lastInspectedServiceValue = savegame.xmlFile:getValue(key .. "#lastInspServValue", spec.lastInspectedServiceValue)
         spec.engineTemperature = savegame.xmlFile:getValue(key .. "#engineTemperature", spec.engineTemperature)
         spec.transmissionTemperature = savegame.xmlFile:getValue(key .. "#transmissionTemperature", spec.transmissionTemperature)
         spec.lastInspectedPower = savegame.xmlFile:getValue(key .. "#lastInspPwr", spec.lastInspectedPower)
@@ -1027,6 +1035,8 @@ function AdvancedDamageSystem:onPostLoad(savegame)
         if spec.pendingRepairQueue == nil then spec.pendingRepairQueue = {} end
         if spec.pendingProgressStepIndex == nil then spec.pendingProgressStepIndex = 0 end
         if spec.pendingProgressTotalTime == nil then spec.pendingProgressTotalTime = 0 end
+        if spec.lastInspectedConditionValue == nil then spec.lastInspectedConditionValue = 0 end
+        if spec.lastInspectedServiceValue == nil then spec.lastInspectedServiceValue = 0 end
         if spec.pendingProgressElapsedTime == nil then spec.pendingProgressElapsedTime = 0 end
         if spec.totalBreakdownsOccurred == nil then spec.totalBreakdownsOccurred = 0 end
         if spec.aiWorkerPid == nil then
@@ -1241,7 +1251,7 @@ function AdvancedDamageSystem:onUpdate(dt, ...)
     end
 
     --- Cold engine message
-    if spec ~= nil and self:getIsMotorStarted() and spec.engineTemperature <= ADS_Config.CORE.COLD_MOTOR_THRESHOLD and self.getIsControlled ~= nil and self:getIsControlled()  and not self:getIsAIActive() and not spec.isElectricVehicle then
+    if not self.isServer and g_currentMission ~= nil and g_currentMission.controlledVehicle == self and spec ~= nil and self:getIsMotorStarted() and spec.engineTemperature <= ADS_Config.CORE.COLD_MOTOR_THRESHOLD and self.getIsControlled ~= nil and self:getIsControlled() and not self:getIsAIActive() and not spec.isElectricVehicle then
             local spec_motorized = self.spec_motorized
             local lastRpm = spec_motorized.motor:getLastModulatedMotorRpm()
             local maxRpm = spec_motorized.motor.maxRpm
@@ -1255,7 +1265,7 @@ function AdvancedDamageSystem:onUpdate(dt, ...)
     if spec ~= nil and spec.activeFunctions ~= nil and next(spec.activeEffects) ~= nil then
         for _, effectData in pairs(spec.activeEffects) do
             if effectData ~= nil and effectData.extraData ~= nil and effectData.extraData.message ~= nil then
-                if self.getIsControlled ~= nil and self:getIsControlled() and not self:isUnderService() then
+                if not self.isServer and g_currentMission ~= nil and g_currentMission.controlledVehicle == self and self.getIsControlled ~= nil and self:getIsControlled() and not self:isUnderService() then
                     g_currentMission:showBlinkingWarning(g_i18n:getText(effectData.extraData.message), 200)
                 end
                 if self:getIsAIActive() and effectData.extraData.disableAi then 
@@ -2741,6 +2751,21 @@ function AdvancedDamageSystem:completeService()
 
     spec.pendingSelectedBreakdowns = selectedBreakdowns
     self:recalculateAndApplyEffects()
+
+    local env = g_currentMission.environment
+    local currentDate = { day = env.currentDayInPeriod or 1, month = env.currentPeriod or 1, year = env.currentYear or 1 }
+    spec.lastInspectedConditionValue = self:getConditionLevel()
+    spec.lastInspectedServiceValue = self:getServiceLevel()
+
+    if serviceType == states.INSPECTION or serviceType == states.MAINTENANCE or serviceType == states.OVERHAUL then
+        spec.lastInspectionDate = currentDate
+    end
+
+    if serviceType == states.MAINTENANCE or serviceType == states.OVERHAUL then
+        spec.lastServiceDate = currentDate
+        spec.lastServiceOperatingHours = self:getFormattedOperatingTime()
+    end
+
     self:addEntryToMaintenanceLog(serviceType, optionOne, optionTwo, optionThree, spec.pendingServicePrice, true)
 
     local lastEntry = spec.maintenanceLog and spec.maintenanceLog[#spec.maintenanceLog]
@@ -3003,8 +3028,12 @@ end
 
 function AdvancedDamageSystem:getLastInspectedCondition()
     local spec = self.spec_AdvancedDamageSystem
-    if not spec or not spec.maintenanceLog or #spec.maintenanceLog == 0 then
+    if not spec then
         return 0
+    end
+
+    if not spec.maintenanceLog or #spec.maintenanceLog == 0 then
+        return spec.lastInspectedConditionValue or 0, true
     end
 
     for i = #spec.maintenanceLog, 1, -1 do
@@ -3018,8 +3047,12 @@ end
 
 function AdvancedDamageSystem:getLastInspectedService()
     local spec = self.spec_AdvancedDamageSystem
-    if not spec or not spec.maintenanceLog or #spec.maintenanceLog == 0 then
+    if not spec then
         return 0
+    end
+
+    if not spec.maintenanceLog or #spec.maintenanceLog == 0 then
+        return spec.lastInspectedServiceValue or 0, true
     end
 
     for i = #spec.maintenanceLog, 1, -1 do
@@ -3033,8 +3066,12 @@ end
 
 function AdvancedDamageSystem:getLastInspectionDate()
     local spec = self.spec_AdvancedDamageSystem
-    if not spec or not spec.maintenanceLog or #spec.maintenanceLog == 0 then
+    if not spec then
         return 0
+    end
+
+    if not spec.maintenanceLog or #spec.maintenanceLog == 0 then
+        return spec.lastInspectionDate or 0
     end
 
     for i = #spec.maintenanceLog, 1, -1 do
@@ -3047,8 +3084,12 @@ end
 
 function AdvancedDamageSystem:getLastMaintenanceDate()
     local spec = self.spec_AdvancedDamageSystem
-    if not spec or not spec.maintenanceLog or #spec.maintenanceLog == 0 then
+    if not spec then
         return 0
+    end
+
+    if not spec.maintenanceLog or #spec.maintenanceLog == 0 then
+        return spec.lastServiceDate or 0
     end
 
     for i = #spec.maintenanceLog, 1, -1 do
